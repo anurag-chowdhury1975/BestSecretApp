@@ -4,24 +4,110 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import os
-import PIL
-import tensorflow as tf
 import cv2
-import math
+from PIL import Image
+# import gradcam as gcam # Helper file contains the class definition for GradCAM
+from tensorflow.keras.models import load_model
+from tensorflow.keras.preprocessing import image
+from tensorflow.keras.applications import imagenet_utils
+from tf_explain.core.grad_cam import GradCAM
 
-from tensorflow import keras
-from tensorflow.keras import layers
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.models import Model
-# from sklearn.metrics import confusion_matrix, classification_report, accuracy_score
-# from struct import unpack
-# from tqdm import tqdm
+# @st.cache_data    
+def load_models():
+    models = {}
+    model_bags = load_model('models/bag_restnet50_model.h5', custom_objects={'imagenet_utils': imagenet_utils})
+    model_clothes = load_model('models/clothes_model_resnet_ft.h5', custom_objects={'imagenet_utils': imagenet_utils})
+    # model_schuhe = load_model('models/schuhe_baseline_cnn_model.h5')
+    model_schuhe = load_model('models/schuhe_model_resnet_ft.h5', custom_objects={'imagenet_utils': imagenet_utils})
+    # model_schuhe = load_model('models/schuhe_model_EffB0.h5', custom_objects={'imagenet_utils': imagenet_utils})
+    model_waesche = load_model('models/model_resnet_finetuned_waesch_92_.h5', custom_objects={'imagenet_utils': imagenet_utils})
+    models['Bags'] = model_bags
+    models['Clothes'] = model_clothes
+    models['Schuhe'] = model_schuhe
+    models['Waesche'] = model_waesche
+    return models
 
+# def get_model_functional_layer(model):
+#     for layer in model.layers:
+#         print(f"layer.name = {layer.name}")
+#         print(f"layer.type = {type(layer)}")
+#         if 'model' in layer.name:
+#             return layer
+    return model
+
+models = load_models()
+explainer = GradCAM()
+
+model = ""
+
+view_labels = {
+    "Bags": ["Front","Side","Inside","Back","Look"],
+    "Clothes": ["Model Front","Zoomed","Model Back","Ghost","Look"],
+    "Schuhe": ["Overll to Right","Back","Top or Sole","Side to Left","Zoom"],
+    "Waesche": ["Model Front","Zoomed","Model Back","Ghost","Look"]
+}
+
+st.set_page_config(page_title="Image View Classifier", layout="wide")
 st.header("Image View Classifier")
 prod_cat = st.selectbox(label="Select Product Category", options=["Bags","Clothes","Schuhe","Waesche"])
-prod_cat_class = st.selectbox(label="Select Product View", options=[""])
-file = st.file_uploader("Please choose a file")
+prod_cat_class = st.selectbox(label="Select Product View", options=view_labels.get(prod_cat))
+model = models.get(prod_cat)
 
-if file is not None:
-    img_data = file.getvalue()
-    st.image(img_data, caption='Model Prediction = {}')
+uploaded_image = st.file_uploader("Please choose an image...", type=["jpg", "jpeg", "png"])
+
+container = st.container(border=True)
+left_column1, middle_column1, right_column1 = st.columns([1,1,1])
+
+# start_over()
+
+if uploaded_image is not None:
+    # img_data = file.getvalue()
+    # img = Image.open(uploaded_image)
+    img = image.load_img(uploaded_image)
+    # img = image.img_to_array(img)
+    # img = image.load_img(uploaded_image, target_size=(224, 224))
+    predictions = model.predict(np.expand_dims(img, axis=0))
+    predicted_label_index = np.argmax(predictions, axis=1)[0]
+    predicted_label = view_labels.get(prod_cat)[predicted_label_index]
+    if predicted_label == prod_cat_class:
+        container.markdown(':green[**Selected view (label) matches prediction.**]')
+    else:
+        container.markdown(':red[**Selected view (label) DOES NOT match prediction.**]')
+        container.markdown(':red[Please make sure you have selected the correct view for this image]')
+
+    left_column1.image(img)
+    # if prod_cat == 'Schuhe':
+    # gc = gcam.GradCAM(model=model, classIdx=predicted_label_index)
+    # heatmap = gc.compute_heatmap(img, verbose=True)
+    # heatmap = cv2.resize(heatmap, (img.size[1], img.size[0]),
+    #                     interpolation=cv2.INTER_CUBIC)
+    # (heatmap, output) = vgg_gc.overlay_heatmap(heatmap, image, alpha=0.45)
+    # heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
+    # output = cv2.cvtColor(output, cv2.COLOR_BGR2RGB)
+
+    # middle_column1.image(output)
+    # else:
+    # print("Before")
+    # grid = explainer.explain(np.expand_dims(img, axis=0), get_model_functional_layer(model), class_index=predicted_label_index, layer_name="conv5_block3_out")
+    # print(f"After, grid type = {type(grid)}")
+    # middle_column1.image(grid)
+    middle_column1.markdown('**GradCAM image will come here**')
+    df = pd.DataFrame({"probs": predictions[0]}).sort_values(by="probs", ascending=False).reset_index()
+    print(df)
+    right_column1.markdown(f'**Predicted View = {predicted_label}**\n\n'
+                        'View propabilities: \n\n'
+                        f'{view_labels.get(prod_cat)[df["index"][0]]} = {round(df["probs"][0]*100, 2)}%\n\n'
+                        f'{view_labels.get(prod_cat)[df["index"][1]]} = {round(df["probs"][1]*100, 2)}%\n\n'
+                        f'{view_labels.get(prod_cat)[df["index"][2]]} = {round(df["probs"][2]*100, 2)}%\n\n'
+                        f'{view_labels.get(prod_cat)[df["index"][3]]} = {round(df["probs"][3]*100, 2)}%\n\n'
+                        f'{view_labels.get(prod_cat)[df["index"][4]]} = {round(df["probs"][4]*100, 2)}%\n\n'
+
+                        # f'{view_labels.get(prod_cat)[0]} = {round(predictions[0][0]*100, 2)}%\n\n'
+                        # f'{view_labels.get(prod_cat)[1]} = {round(predictions[0][1]*100, 2)}%\n\n'
+                        # f'{view_labels.get(prod_cat)[2]} = {round(predictions[0][2]*100, 2)}%\n\n'
+                        # f'{view_labels.get(prod_cat)[3]} = {round(predictions[0][3]*100, 2)}%\n\n'
+                        # f'{view_labels.get(prod_cat)[4]} = {round(predictions[0][4]*100, 2)}%\n\n'
+                        )
+
+
+             
