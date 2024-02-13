@@ -16,8 +16,8 @@ from tensorflow.keras.applications import imagenet_utils
 def load_models():
     models = {}
     model_bags = load_model('models/bag_restnet50_model_ft_l5_93%.h5', custom_objects={'imagenet_utils': imagenet_utils})
-    model_clothes = load_model('models/clothes_restnet50_func_model_97%', custom_objects={'imagenet_utils': imagenet_utils})
-    model_schuhe = load_model('models/schuhe_model_resnet_ft.h5', custom_objects={'imagenet_utils': imagenet_utils})
+    model_clothes = load_model('models/clothes_restnet50_func_model_97%.h5', custom_objects={'imagenet_utils': imagenet_utils})
+    model_schuhe = load_model('models/schuhe_restnet50_model_ft_all_94%.h5', custom_objects={'imagenet_utils': imagenet_utils})
     model_waesche = load_model('models/waesch_funcResnet_model_94%.h5', custom_objects={'imagenet_utils': imagenet_utils})
     models['Bags'] = model_bags
     models['Clothes'] = model_clothes
