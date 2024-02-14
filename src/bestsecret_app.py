@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import os
 import cv2
+import math
 from PIL import Image
 import gradcam as gcam # Helper file contains the class definition for GradCAM
 from tensorflow.keras.models import load_model
@@ -50,16 +51,30 @@ def eval_model_on_test(model, test_ds):
         predictions.extend(batch_preds)
         test_labels.extend(labels)
     if len(predictions[0]) > 1:
-        predictions = np.argmax(predictions, axis=1)
+        predictions_max = np.argmax(predictions, axis=1)
     else:
-        predictions = np.array(predictions)
+        predictions_max = np.array(predictions)
 
     test_labels = np.array(test_labels)
 
-    return test_labels, predictions
+    return test_labels, predictions_max, predictions
+
+def get_mismatches(y_true, y_pred, BATCH_SIZE):
+    num_mismatches = 0
+    mismatch_tensor_indexes = {}
+    for i in range(len(y_true)):
+      if y_true[i] != y_pred[i]:
+        num_mismatches += 1
+        key = (i//BATCH_SIZE)
+        tensor_index = (i % BATCH_SIZE)
+        if mismatch_tensor_indexes.get(key) is not None:
+          mismatch_tensor_indexes[key].append((tensor_index, i))
+        else:
+          mismatch_tensor_indexes[key] = [(tensor_index, i)]
+    return num_mismatches, mismatch_tensor_indexes
 
 models = load_models()
-# explainer = GradCAM()
+BATCH_SIZE = 32
 
 model = ""
 
@@ -132,13 +147,58 @@ with tab1:
 with tab2:
     test_ds = Dataset.load(f'data/{prod_cat}/test_dataset')
     if tab2.button("Run Prediction on Test Dataset"):
-        y_true, y_pred = eval_model_on_test(model, test_ds)
+        y_true, y_pred, y_pred_all = eval_model_on_test(model, test_ds)
         score = (accuracy_score(y_true, y_pred)*100)
-        tab2.markdown("\n\nAccuracy of base model on test data: **%.2f%%**" % score)
-        tab2.markdown("\n\n**Classification Report:**")
         report = classification_report(y_true, y_pred, output_dict=True)
-        tab2.write(pd.DataFrame(report).transpose()) #, target_names=CLASSES
-        tab2.markdown("\n\n**Confusion Matrix:**")
-        tab2.write(pd.DataFrame(confusion_matrix(y_true, y_pred)))
+        tab2.markdown("\n\n<p style='font-size:20px;'>Accuracy of base model on test data: <b>%.2f%%</b></p>" % score, unsafe_allow_html=True)
+
+        left_column1, right_column1 = tab2.columns([1,1])
+        rpt_df = pd.DataFrame(report).transpose()
+        label_vals = view_labels.get(prod_cat)
+        label_vals.extend(['','',''])
+        rpt_df.insert(0, "Label", label_vals)
+        left_column1.markdown("\n\n**Classification Report:**\n")
+        left_column1.write(rpt_df)
+                       
+        right_column1.markdown("\n\n**Confusion Matrix (Rows=Labels; Cols=Predictions):**")
+        right_column1.write(pd.DataFrame(confusion_matrix(y_true, y_pred)))
+
+        num_mismatches, mismatch_tensor_indexes = get_mismatches(y_true, y_pred, BATCH_SIZE)
+        i=0
+        total_tensor_batches = math.ceil(len(y_pred)/BATCH_SIZE)
+        tensor_batch = 0
+        for images, labels in test_ds.take(total_tensor_batches):
+            if mismatch_tensor_indexes.get(tensor_batch) is not None:
+                for tensor_batch_mismatches in mismatch_tensor_indexes.get(tensor_batch):
+                    container2 = tab2.container(border=True)
+                    left_column2, middle_column2, right_column2 = container2.columns([1,1,1])
+                    left_column2.image(images[tensor_batch_mismatches[0]].numpy().astype("uint8"))
+
+                    label_index = y_true[tensor_batch_mismatches[1]]
+                    pred_index = y_pred[tensor_batch_mismatches[1]]
+                    pred = y_pred_all[tensor_batch_mismatches[1]]
+                    gc2 = gcam.GradCAM(model=model, classIdx=pred_index)
+                    img2 = np.expand_dims(images[tensor_batch_mismatches[0]].numpy().astype("uint8"), axis=0)
+                    heatmap2 = gc2.compute_heatmap(img2, verbose=True)
+                    heatmap2 = cv2.resize(heatmap2, (images[tensor_batch_mismatches[0]].shape[1], images[tensor_batch_mismatches[0]].shape[0]),
+                                        interpolation=cv2.INTER_CUBIC)
+                    (heatmap2, output2) = gc2.overlay_heatmap(heatmap2, images[tensor_batch_mismatches[0]].numpy().astype("uint8"), alpha=0.45)
+                    heatmap2 = cv2.cvtColor(heatmap2, cv2.COLOR_BGR2RGB)
+                    output2 = cv2.cvtColor(output2, cv2.COLOR_BGR2RGB)
+
+                    middle_column2.image(output2)
+
+                    df2 = pd.DataFrame({"probs": pred}).sort_values(by="probs", ascending=False).reset_index()
+                    right_column2.markdown(f'**Labelled View = {view_labels.get(prod_cat)[label_index]}**\n\n')
+                    right_column2.markdown(f'**Predicted View = {view_labels.get(prod_cat)[pred_index]}**\n\n')
+                    right_column2.markdown(f'View propabilities: \n\n'
+                            f'{view_labels.get(prod_cat)[df2["index"][0]]} = {round(df2["probs"][0]*100, 2)}%\n\n'
+                            f'{view_labels.get(prod_cat)[df2["index"][1]]} = {round(df2["probs"][1]*100, 2)}%\n\n'
+                            f'{view_labels.get(prod_cat)[df2["index"][2]]} = {round(df2["probs"][2]*100, 2)}%\n\n'
+                            f'{view_labels.get(prod_cat)[df2["index"][3]]} = {round(df2["probs"][3]*100, 2)}%\n\n'
+                            f'{view_labels.get(prod_cat)[df2["index"][4]]} = {round(df2["probs"][4]*100, 2)}%\n\n'
+                            )
+                    i += 1
+            tensor_batch += 1
 
              
