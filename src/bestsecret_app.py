@@ -164,6 +164,8 @@ with tab2:
         right_column1.write(pd.DataFrame(confusion_matrix(y_true, y_pred)))
 
         num_mismatches, mismatch_tensor_indexes = get_mismatches(y_true, y_pred, BATCH_SIZE)
+        tab2.markdown(f"\n\n<p style='font-size:20px;'>Total number of mismatches: <b>{num_mismatches}</b></p>", unsafe_allow_html=True)
+
         i=0
         total_tensor_batches = math.ceil(len(y_pred)/BATCH_SIZE)
         tensor_batch = 0
